@@ -73,7 +73,7 @@ import org.hl7.fhir.r4.model.ExplanationOfBenefit;
 import org.hl7.fhir.r4.model.ExplanationOfBenefit.RemittanceOutcome;
 import org.hl7.fhir.r4.model.ExplanationOfBenefit.TotalComponent;
 import org.hl7.fhir.r4.model.ExplanationOfBenefit.Use;
-import org.hl7.fhir.r4.model.Extension;
+//import org.hl7.fhir.r4.model.Extension;
 import org.hl7.fhir.r4.model.Goal;
 import org.hl7.fhir.r4.model.Goal.GoalLifecycleStatus;
 import org.hl7.fhir.r4.model.HumanName;
@@ -170,6 +170,14 @@ public class FhirR4 {
   private static final String DICOM_DCM_URI = "http://dicom.nema.org/resources/ontology/DCM";
   private static final String MEDIA_TYPE_URI = "http://terminology.hl7.org/CodeSystem/media-type";
   private static final String SYNTHEA_IDENTIFIER = "https://github.com/synthetichealth/synthea";
+  
+  private static final String FIXED_ORG = Config.get("exporter.hsop.fixed_org");
+  private static final String FIXED_PRACTITIONER_ID = Config.get("exporter.hsop.fixed_practitioner_id");
+  private static final int MAX_ENCOUNTER_COUNT = Integer.parseInt(Config.get("exporter.hsop.max_encounter_count"));
+  private static final int MAX_OBSERVATION_COUNT = Integer.parseInt(Config.get("exporter.hsop.max_observation_count"));
+  private static final int MAX_PROCEDURE_COUNT = Integer.parseInt(Config.get("exporter.hsop.max_procedure_count"));
+  private static final int MAX_CLAIM_COUNT = Integer.parseInt(Config.get("exporter.hsop.max_claim_count"));
+  
 
   @SuppressWarnings("rawtypes")
   private static final Map raceEthnicityCodes = loadRaceEthnicityCodes();
@@ -260,11 +268,21 @@ public class FhirR4 {
     } else {
       bundle.setType(BundleType.COLLECTION);
     }
+    
+    int encCount = 0;
+    int obsCount = 0;
+    int prcCount = 0;
+    int clmCount = 0;
 
     BundleEntryComponent personEntry = basicInfo(person, bundle, stopTime);
 
     for (Encounter encounter : person.record.encounters) {
+      
       BundleEntryComponent encounterEntry = encounter(person, personEntry, bundle, encounter);
+      encCount += 1;
+      if (encCount >= MAX_ENCOUNTER_COUNT) {
+	        continue;
+	      }
 
       for (HealthRecord.Entry condition : encounter.conditions) {
         condition(person, personEntry, bundle, encounterEntry, condition);
@@ -277,32 +295,41 @@ public class FhirR4 {
       for (Observation observation : encounter.observations) {
         // If the Observation contains an attachment, use a Media resource, since
         // Observation resources in v4 don't support Attachments
+    	  if (obsCount >= MAX_OBSERVATION_COUNT) {
+              continue;
+            }
         if (observation.value instanceof Attachment) {
           media(person, personEntry, bundle, encounterEntry, observation);
+          obsCount += 1;
         } else {
           observation(person, personEntry, bundle, encounterEntry, observation);
+          obsCount += 1;
         }
       }
 
       for (Procedure procedure : encounter.procedures) {
+    	  if (prcCount >= MAX_PROCEDURE_COUNT) {
+              continue;
+            }
         procedure(person, personEntry, bundle, encounterEntry, procedure);
+        prcCount += 1;
       }
 
-      for (HealthRecord.Device device : encounter.devices) {
-        device(person, personEntry, bundle, device);
-      }
+      // for (HealthRecord.Device device : encounter.devices) {
+      //   device(person, personEntry, bundle, device);
+      // }
 
-      for (HealthRecord.Supply supply : encounter.supplies) {
-        supplyDelivery(person, personEntry, bundle, supply, encounter);
-      }
+      // for (HealthRecord.Supply supply : encounter.supplies) {
+      //   supplyDelivery(person, personEntry, bundle, supply, encounter);
+      // }
 
       for (Medication medication : encounter.medications) {
         medicationRequest(person, personEntry, bundle, encounterEntry, medication);
       }
 
-      for (HealthRecord.Entry immunization : encounter.immunizations) {
-        immunization(person, personEntry, bundle, encounterEntry, immunization);
-      }
+      // for (HealthRecord.Entry immunization : encounter.immunizations) {
+      //   immunization(person, personEntry, bundle, encounterEntry, immunization);
+      // }
 
       for (Report report : encounter.reports) {
         report(person, personEntry, bundle, encounterEntry, report);
@@ -325,13 +352,16 @@ public class FhirR4 {
             (encounter == person.record.encounters.get(person.record.encounters.size() - 1));
         clinicalNote(person, personEntry, bundle, encounterEntry, clinicalNoteText, lastNote);
       }
-
+      
+      if (clmCount >= MAX_CLAIM_COUNT) {
+          continue;
+        }
       // one claim per encounter
       BundleEntryComponent encounterClaim =
           encounterClaim(person, personEntry, bundle, encounterEntry, encounter.claim);
 
-      explanationOfBenefit(personEntry, bundle, encounterEntry, person,
-          encounterClaim, encounter);
+      /*explanationOfBenefit(personEntry, bundle, encounterEntry, person,
+          encounterClaim, encounter);*/
     }
 
     if (USE_US_CORE_IG) {
@@ -421,84 +451,10 @@ public class FhirR4 {
       patientResource.addContact(contact);
     }
 
-    if (USE_US_CORE_IG) {
-      // We do not yet account for mixed race
-      Extension raceExtension = new Extension(
-          "http://hl7.org/fhir/us/core/StructureDefinition/us-core-race");
-      String race = (String) person.attributes.get(Person.RACE);
+    
 
-      String raceDisplay;
-      switch (race) {
-        case "white":
-          raceDisplay = "White";
-          break;
-        case "black":
-          raceDisplay = "Black or African American";
-          break;
-        case "asian":
-          raceDisplay = "Asian";
-          break;
-        case "native":
-          raceDisplay = "American Indian or Alaska Native";
-          break;
-        case "hawaiian":
-          raceDisplay = "Native Hawaiian or Other Pacific Islander";
-          break;
-        default:
-          raceDisplay = "Other";
-          break;
-      }
-
-      String raceNum = (String) raceEthnicityCodes.get(race);
-
-      Extension raceCodingExtension = new Extension("ombCategory");
-      Coding raceCoding = new Coding();
-      if (raceDisplay.equals("Other")) {
-        raceCoding.setSystem("http://terminology.hl7.org/CodeSystem/v3-NullFlavor");
-        raceCoding.setCode("UNK");
-        raceCoding.setDisplay("Unknown");
-      } else {
-        raceCoding.setSystem("urn:oid:2.16.840.1.113883.6.238");
-        raceCoding.setCode(raceNum);
-        raceCoding.setDisplay(raceDisplay);
-      }
-      raceCodingExtension.setValue(raceCoding);
-      raceExtension.addExtension(raceCodingExtension);
-
-      Extension raceTextExtension = new Extension("text");
-      raceTextExtension.setValue(new StringType(raceDisplay));
-      raceExtension.addExtension(raceTextExtension);
-      patientResource.addExtension(raceExtension);
-
-      // We do not yet account for mixed ethnicity
-      Extension ethnicityExtension = new Extension(
-          "http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity");
-      String ethnicity = (String) person.attributes.get(Person.ETHNICITY);
-
-      String ethnicityDisplay;
-      if (ethnicity.equals("hispanic")) {
-        ethnicity = "hispanic";
-        ethnicityDisplay = "Hispanic or Latino";
-      } else {
-        ethnicity = "nonhispanic";
-        ethnicityDisplay = "Not Hispanic or Latino";
-      }
-
-      String ethnicityNum = (String) raceEthnicityCodes.get(ethnicity);
-
-      Extension ethnicityCodingExtension = new Extension("ombCategory");
-      Coding ethnicityCoding = new Coding();
-      ethnicityCoding.setSystem("urn:oid:2.16.840.1.113883.6.238");
-      ethnicityCoding.setCode(ethnicityNum);
-      ethnicityCoding.setDisplay(ethnicityDisplay);
-      ethnicityCodingExtension.setValue(ethnicityCoding);
-
-      ethnicityExtension.addExtension(ethnicityCodingExtension);
-      Extension ethnicityTextExtension = new Extension("text");
-      ethnicityTextExtension.setValue(new StringType(ethnicityDisplay));
-      ethnicityExtension.addExtension(ethnicityTextExtension);
-      patientResource.addExtension(ethnicityExtension);
-    }
+      
+  
 
     String firstLanguage = (String) person.attributes.get(Person.FIRST_LANGUAGE);
     Map languageMap = (Map) languageLookup.get(firstLanguage);
@@ -533,30 +489,22 @@ public class FhirR4 {
       }
     }
 
-    Extension mothersMaidenNameExtension = new Extension(
-        "http://hl7.org/fhir/StructureDefinition/patient-mothersMaidenName");
-    String mothersMaidenName = (String) person.attributes.get(Person.NAME_MOTHER);
-    mothersMaidenNameExtension.setValue(new StringType(mothersMaidenName));
-    patientResource.addExtension(mothersMaidenNameExtension);
+    
 
     long birthdate = (long) person.attributes.get(Person.BIRTHDATE);
     patientResource.setBirthDate(new Date(birthdate));
 
-    Extension birthSexExtension = new Extension(
-        "http://hl7.org/fhir/us/core/StructureDefinition/us-core-birthsex");
+    
     if (person.attributes.get(Person.GENDER).equals("M")) {
       patientResource.setGender(AdministrativeGender.MALE);
-      birthSexExtension.setValue(new CodeType("M"));
+    
     } else if (person.attributes.get(Person.GENDER).equals("F")) {
       patientResource.setGender(AdministrativeGender.FEMALE);
-      birthSexExtension.setValue(new CodeType("F"));
+    
     } else if (person.attributes.get(Person.GENDER).equals("UNK")) {
       patientResource.setGender(AdministrativeGender.UNKNOWN);
     }
-    if (USE_US_CORE_IG) {
-      patientResource.addExtension(birthSexExtension);
-    }
-
+    
     String state = (String) person.attributes.get(Person.STATE);
     if (USE_US_CORE_IG) {
       state = Location.getAbbreviation(state);
@@ -575,11 +523,7 @@ public class FhirR4 {
         .setState((String) person.attributes.get(Person.BIRTH_STATE))
         .setCountry((String) person.attributes.get(Person.BIRTH_COUNTRY));
 
-    Extension birthplaceExtension = new Extension(
-        "http://hl7.org/fhir/StructureDefinition/patient-birthPlace");
-    birthplaceExtension.setValue(birthplace);
-    patientResource.addExtension(birthplaceExtension);
-
+    
     if (person.attributes.get(Person.MULTIPLE_BIRTH_STATUS) != null) {
       patientResource.setMultipleBirth(
           new IntegerType((int) person.attributes.get(Person.MULTIPLE_BIRTH_STATUS)));
@@ -607,13 +551,7 @@ public class FhirR4 {
     }
 
     Point2D.Double coord = person.getLonLat();
-    if (coord != null) {
-      Extension geolocation = addrResource.addExtension();
-      geolocation.setUrl("http://hl7.org/fhir/StructureDefinition/geolocation");
-      geolocation.addExtension("latitude", new DecimalType(coord.getY()));
-      geolocation.addExtension("longitude", new DecimalType(coord.getX()));
-    }
-
+    
     if (!person.alive(stopTime)) {
       patientResource.setDeceased(
           convertFhirDateTime((Long) person.attributes.get(Person.DEATHDATE), true));
@@ -640,33 +578,13 @@ public class FhirR4 {
           .setValue(new BooleanType(true));
 
       String fathersName = (String) person.attributes.get(Person.NAME_FATHER);
-      Extension fathersNameExtension = new Extension(
-          SHR_EXT + "shr-entity-FathersName-extension", new HumanName().setText(fathersName));
-      patientResource.addExtension(fathersNameExtension);
-
-      String ssn = (String) person.attributes.get(Person.IDENTIFIER_SSN);
-      Extension ssnExtension = new Extension(
-          SHR_EXT + "shr-demographics-SocialSecurityNumber-extension",
-          new StringType(ssn));
-      patientResource.addExtension(ssnExtension);
+      
+      
     }
 
     // DALY and QALY values
     // we only write the last(current) one to the patient record
-    Double dalyValue = (Double) person.attributes.get("most-recent-daly");
-    Double qalyValue = (Double) person.attributes.get("most-recent-qaly");
-    if (dalyValue != null) {
-      Extension dalyExtension = new Extension(SYNTHEA_EXT + "disability-adjusted-life-years");
-      DecimalType daly = new DecimalType(dalyValue);
-      dalyExtension.setValue(daly);
-      patientResource.addExtension(dalyExtension);
-
-      Extension qalyExtension = new Extension(SYNTHEA_EXT + "quality-adjusted-life-years");
-      DecimalType qaly = new DecimalType(qalyValue);
-      qalyExtension.setValue(qaly);
-      patientResource.addExtension(qalyExtension);
-    }
-
+    
     return newEntry(bundle, patientResource, (String) person.attributes.get(Person.ID));
   }
 
@@ -689,12 +607,7 @@ public class FhirR4 {
     } else if (USE_SHR_EXTENSIONS) {
       encounterResource.setMeta(
           new Meta().addProfile(SHR_EXT + "shr-encounter-EncounterPerformed"));
-      Extension performedContext = new Extension();
-      performedContext.setUrl(SHR_EXT + "shr-action-PerformedContext-extension");
-      performedContext.addExtension(
-          SHR_EXT + "shr-action-Status-extension",
-          new CodeType("finished"));
-      encounterResource.addExtension(performedContext);
+      
     }
 
     Patient patient = (Patient) personEntry.getResource();
@@ -733,8 +646,8 @@ public class FhirR4 {
     }
 
     if (TRANSACTION_BUNDLE) {
-      encounterResource.setServiceProvider(new Reference(
-              ExportHelper.buildFhirSearchUrl("Organization", provider.getResourceID())));
+    	String fulluri = "Organization/" + FIXED_ORG;
+      encounterResource.setServiceProvider(new Reference(fulluri));
     } else {
       String providerFullUrl = findProviderUrl(provider, bundle);
       if (providerFullUrl != null) {
@@ -756,8 +669,8 @@ public class FhirR4 {
 
     if (encounter.clinician != null) {
       if (TRANSACTION_BUNDLE) {
-        encounterResource.addParticipant().setIndividual(new Reference(
-                ExportHelper.buildFhirNpiSearchUrl(encounter.clinician)));
+    	  String practfulluri = "Practitioner/" + FIXED_PRACTITIONER_ID;
+        encounterResource.addParticipant().setIndividual(new Reference(practfulluri));
       } else {
         String practitionerFullUrl = findPractitioner(encounter.clinician, bundle);
         if (practitionerFullUrl != null) {
@@ -1543,7 +1456,11 @@ public class FhirR4 {
           Observation observation) {
     org.hl7.fhir.r4.model.Observation observationResource =
         new org.hl7.fhir.r4.model.Observation();
-
+    
+    String fulluri = "Organization/" + FIXED_ORG;
+    List <Reference> obsPerformer = new ArrayList<Reference>();
+    obsPerformer.add(new Reference(fulluri));
+    
     observationResource.setSubject(new Reference(personEntry.getFullUrl()));
     observationResource.setEncounter(new Reference(encounterEntry.getFullUrl()));
 
@@ -1741,14 +1658,7 @@ public class FhirR4 {
       // required fields for this profile are action-PerformedContext-extension,
       // status, code, subject, performed[x]
 
-      Extension performedContext = new Extension();
-      performedContext.setUrl(SHR_EXT + "shr-action-PerformedContext-extension");
-      performedContext.addExtension(
-          SHR_EXT + "shr-action-Status-extension",
-          new CodeType("completed"));
-
-      procedureResource.addExtension(performedContext);
-    }
+          }
 
     BundleEntryComponent procedureEntry = newEntry(rand, bundle, procedureResource);
     procedure.fullUrl = procedureEntry.getFullUrl();
@@ -1914,12 +1824,7 @@ public class FhirR4 {
       immResource.setMeta(meta);
     } else if (USE_SHR_EXTENSIONS) {
       immResource.setMeta(new Meta().addProfile(SHR_EXT + "shr-immunization-ImmunizationGiven"));
-      Extension performedContext = new Extension();
-      performedContext.setUrl(SHR_EXT + "shr-action-PerformedContext-extension");
-      performedContext.addExtension(
-          SHR_EXT + "shr-action-Status-extension",
-          new CodeType("completed"));
-      immResource.addExtension(performedContext);
+      
     }
     immResource.setStatus(ImmunizationStatus.COMPLETED);
     immResource.setOccurrence(convertFhirDateTime(immunization.start, true));
@@ -1966,15 +1871,6 @@ public class FhirR4 {
       medicationResource.setMeta(new Meta()
           .addProfile(SHR_EXT + "shr-medication-MedicationRequested"));
 
-      Extension requestedContext = new Extension();
-      requestedContext.setUrl(SHR_EXT + "shr-action-RequestedContext-extension");
-      requestedContext.addExtension(
-          SHR_EXT + "shr-action-Status-extension",
-          new CodeType("completed"));
-      requestedContext.addExtension(
-          SHR_EXT + "shr-action-RequestIntent-extension",
-          new CodeType("original-order"));
-      medicationResource.addExtension(requestedContext);
     }
     medicationResource.setSubject(new Reference(personEntry.getFullUrl()));
     medicationResource.setEncounter(new Reference(encounterEntry.getFullUrl()));
@@ -3057,6 +2953,18 @@ public class FhirR4 {
   private static BundleEntryComponent newEntry(RandomNumberGenerator rand, Bundle bundle,
           Resource resource) {
     String resourceID = rand.randUUID().toString();
+    if (resource.getResourceType().name() == "Organization") {
+        resourceID = FIXED_ORG;
+
+        for (BundleEntryComponent getentry : bundle.getEntry()) {
+          if (getentry.getResource().fhirType().equals("Organization")) {
+            Organization fixedorg = (Organization) getentry.getResource();
+            if (fixedorg.getId() == FIXED_ORG) {
+              return getentry;
+            }
+          }
+        }
+      }
     return newEntry(bundle, resource, resourceID);
   }
 
@@ -3091,6 +2999,13 @@ public class FhirR4 {
               "identifier=" + identifier.getSystem() + "|" + identifier.getValue());
         }
       }
+      if (resource.getResourceType().name() == "Organization") {
+          request.setMethod(HTTPVerb.GET);
+          request.setUrl(resource.getResourceType().name() + "?_id=" + FIXED_ORG);
+        } else {
+          request.setMethod(HTTPVerb.POST);
+          request.setUrl(resource.getResourceType().name());
+        }
       entry.setRequest(request);
     }
 
