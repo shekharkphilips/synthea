@@ -172,7 +172,7 @@ public class FhirR4 {
   private static final String SYNTHEA_IDENTIFIER = "https://github.com/synthetichealth/synthea";
   
   private static final String FIXED_ORG = Config.get("exporter.hsop.fixed_org");
-  private static final String FIXED_PRACTITIONER_ID = Config.get("exporter.hsop.fixed_practitioner_id");
+  // private static final String FIXED_PRACTITIONER_ID = Config.get("exporter.hsop.fixed_practitioner_id");
   private static final int MAX_ENCOUNTER_COUNT = Integer.parseInt(Config.get("exporter.hsop.max_encounter_count"));
   private static final int MAX_OBSERVATION_COUNT = Integer.parseInt(Config.get("exporter.hsop.max_observation_count"));
   private static final int MAX_PROCEDURE_COUNT = Integer.parseInt(Config.get("exporter.hsop.max_procedure_count"));
@@ -342,9 +342,9 @@ public class FhirR4 {
                 careplan);
       }
 
-      for (ImagingStudy imagingStudy : encounter.imagingStudies) {
-        imagingStudy(person, personEntry, bundle, encounterEntry, imagingStudy);
-      }
+      // for (ImagingStudy imagingStudy : encounter.imagingStudies) {
+      //   imagingStudy(person, personEntry, bundle, encounterEntry, imagingStudy);
+      // }
 
       if (USE_US_CORE_IG) {
         String clinicalNoteText = ClinicalNoteExporter.export(person, encounter);
@@ -669,8 +669,9 @@ public class FhirR4 {
 
     if (encounter.clinician != null) {
       if (TRANSACTION_BUNDLE) {
-    	  String practfulluri = "Practitioner/" + FIXED_PRACTITIONER_ID;
-        encounterResource.addParticipant().setIndividual(new Reference(practfulluri));
+    	  //String practfulluri = "Practitioner/" + FIXED_PRACTITIONER_ID;
+        //encounterResource.addParticipant().setIndividual(new Reference(practfulluri));
+        encounterResource.addParticipant().setIndividual(new Reference(ExportHelper.buildFhirNpiSearchUrl(encounter.clinician)));
       } else {
         String practitionerFullUrl = findPractitioner(encounter.clinician, bundle);
         if (practitionerFullUrl != null) {

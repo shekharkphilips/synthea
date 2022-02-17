@@ -56,9 +56,9 @@ public abstract class FhirPractitionerExporterR4 {
               if (doc.getEncounterCount() > 0) {
                 BundleEntryComponent entry = FhirR4.practitioner(rand, bundle, doc);
                 Practitioner practitioner = (Practitioner) entry.getResource();
-                practitioner.addExtension()
-                  .setUrl(EXTENSION_URI)
-                  .setValue(new IntegerType(doc.getEncounterCount()));
+                // practitioner.addExtension()
+                //   .setUrl(EXTENSION_URI)
+                //   .setValue(new IntegerType(doc.getEncounterCount()));
               }
             }
           }
