@@ -111,6 +111,12 @@ Generate a list of concepts (used in the records) or attributes (variables on ea
 ./gradlew attributes
 ```
 
+# Tool
+The tool directory contains the executable to run post execution of the file generation. The command we can use to run are 
+```bash
+.\fdm.synthia.testdatavalidator.exe -d "../output/fhir" -o "../output/R4" -f "*"
+```
+
 # License
 
 Copyright 2017-2022 The MITRE Corporation
