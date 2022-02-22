@@ -134,6 +134,8 @@ To know the arguments required you can use below command.
 ```bash
 .\fdm.synthia.testdatavalidator.exe --help
 ```
+## Flow
+Once we generate the Data using our tool, we would post this bundles to CDR server. But before we post the bundle we must post practioner which is one of the output in synthea tool.
 
 # License
 
